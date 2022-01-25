@@ -23,6 +23,29 @@ pub struct Keys {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct Locks {
+    pub time: DateTime<FixedOffset>,
+    pub exclusive: bool,
+    pub hostname: String,
+    pub username: String,
+    pub pid: usize,
+    pub uid: usize,
+    pub gid: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct RepoCreation {
     pub create: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Object {
+    pub name: String,
+    pub size: usize,
+}
+
+impl Object {
+    pub fn new(name: String, size: usize) -> Self {
+        Object { name, size }
+    }
 }
