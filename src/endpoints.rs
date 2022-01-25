@@ -3,9 +3,8 @@ use warp::hyper::Response;
 use warp::{hyper::body::Bytes, Reply};
 
 use std::fs;
-use std::io::{BufWriter, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 
-use crate::helpers::*;
 use crate::models::{Object, RepoCreation};
 
 const LAYOUT: [&str; 5] = ["data", "index", "keys", "snapshots", "locks"];
@@ -21,11 +20,19 @@ pub fn create_repo(create_flag: RepoCreation) -> impl Reply {
         }
         false => (),
     }
-    warp::reply::with_header(
-        warp::reply(),
-        "Content-Type",
-        "application/vnd.x.restic.rest.v2",
-    )
+    Response::builder()
+        .status(200)
+        .header("Content-Type", "application/vnd.x.restic.rest.v2")
+        .body("")
+        .unwrap()
+}
+
+pub fn delete_repo() -> impl Reply {
+    let location = "./restic";
+    match fs::remove_dir(location) {
+        Ok(_) => Response::builder().status(200).body("").unwrap(),
+        Err(_) => Response::builder().status(403).body("").unwrap(),
+    }
 }
 
 pub fn create_config(config: Bytes) -> impl Reply {
@@ -33,7 +40,7 @@ pub fn create_config(config: Bytes) -> impl Reply {
     let file = fs::File::create("./restic/config").unwrap();
     let mut buf_writer = BufWriter::new(file);
     buf_writer.write(&config).unwrap();
-    warp::reply()
+    Response::builder().status(200).body("").unwrap()
 }
 
 pub fn check_config() -> impl Reply {
@@ -56,33 +63,15 @@ pub fn get_config() -> impl Reply {
 }
 
 pub fn create_obj(obj_type: String, name: String, data: Bytes) -> impl Reply {
-    match obj_type.as_str() {
-        "keys" => {
-            create_key(name, data);
-            Response::builder().status(200).body("").unwrap()
-        }
-        "locks" => {
-            create_lock(name, data);
-            Response::builder().status(200).body("").unwrap()
-        }
-        "data" => {
-            create_data(name, data);
-            Response::builder().status(200).body("").unwrap()
-        }
-        "index" => {
-            create_index(name, data);
-            Response::builder().status(200).body("").unwrap()
-        }
-        "snapshots" => {
-            create_snapshot(name, data);
-            Response::builder().status(200).body("").unwrap()
-        }
-        _ => unimplemented!(),
-    }
+    let location = format!("./restic/{}/{}", obj_type, name);
+    let file = fs::File::create(location).unwrap();
+    let mut buf_writer = BufWriter::new(file);
+    buf_writer.write(&data).unwrap();
+    warp::reply()
 }
 
 pub fn get_obj_list(obj_type: String) -> impl Reply {
-    info!("Received object list request! Listing obj...");
+    info!("Received object list request! Listing object...");
     let location = format!("./restic/{}", obj_type);
     match fs::read_dir(location) {
         Ok(f) => {
@@ -108,41 +97,41 @@ pub fn get_obj_list(obj_type: String) -> impl Reply {
     }
 }
 
+pub fn check_obj(obj_type: String, name: String) -> impl Reply {
+    info!("Received object check request! Checking object...");
+    let location = format!("./restic/{}/{}", obj_type, name);
+    match fs::metadata(location) {
+        Ok(m) => Response::builder()
+            .status(200)
+            .header("Content-Length", m.len())
+            .body("")
+            .unwrap(),
+        Err(_) => Response::builder().status(404).body("").unwrap(),
+    }
+}
+
 pub fn get_obj(obj_type: String, name: String) -> impl Reply {
-    info!("Received object get request! Getting obj...");
-    match obj_type.as_str() {
-        "keys" => {
-            let key = get_key(name);
-            Response::builder()
-                .status(200)
-                .header("Content-Type", "binary/octet-stream")
-                .body(key)
-                .unwrap()
+    info!("Received object get request! Getting object...");
+    let location = format!("./restic/{}/{}", obj_type, name);
+    match fs::File::open(location) {
+        Ok(f) => {
+            let mut buf_reader = BufReader::new(f);
+            let mut buf = vec![];
+            buf_reader.read_to_end(&mut buf).unwrap();
+            Response::builder().status(200).body(buf).unwrap()
         }
-        "locks" => {
-            let lock = get_lock(name);
-            Response::builder()
-                .status(200)
-                .header("Content-Type", "binary/octet-stream")
-                .body(lock)
-                .unwrap()
-        }
-        _ => unimplemented!(),
+        Err(_) => Response::builder().status(404).body(vec![]).unwrap(),
     }
 }
 
 pub fn delete_obj(obj_type: String, name: String) -> impl Reply {
     info!("Received object deletion request! Deleting object...");
-    match obj_type.as_str() {
-        "locks" => {
-            delete_lock(name);
+    let location = format!("./restic/{}/{}", obj_type, name);
+    match fs::File::open(location.clone()) {
+        Ok(_) => {
+            fs::remove_file(location).unwrap();
             Response::builder().status(200).body("").unwrap()
         }
-        "snapshots" => {
-            delete_snapshot(name);
-            Response::builder().status(200).body("").unwrap()
-        }
-
-        _ => unimplemented!(),
+        Err(_) => Response::builder().status(404).body("").unwrap(),
     }
 }
