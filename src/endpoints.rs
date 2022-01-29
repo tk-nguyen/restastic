@@ -1,20 +1,22 @@
 use tracing::info;
 use warp::hyper::Response;
+use warp::Filter;
 use warp::{hyper::body::Bytes, Reply};
 
+use std::convert::Infallible;
 use std::fs;
 use std::io::{BufReader, BufWriter, Read, Write};
 
-use crate::models::{Object, RepoCreation};
+use crate::models::{Object, RepoCreation, ServerConfig};
 
 const LAYOUT: [&str; 5] = ["data", "index", "keys", "snapshots", "locks"];
 
-pub fn create_repo(create_flag: RepoCreation) -> impl Reply {
+pub async fn create_repo(create_flag: RepoCreation, server_config: ServerConfig) -> impl Reply {
     info!("Received repo creation request! Creating layouts...");
     match create_flag.create {
         true => {
             for dir in LAYOUT {
-                let location = format!("./restic/{}", dir);
+                let location = format!("{}/{}", server_config.repo_location, dir);
                 fs::create_dir(location).unwrap();
             }
         }
@@ -27,25 +29,25 @@ pub fn create_repo(create_flag: RepoCreation) -> impl Reply {
         .unwrap()
 }
 
-pub fn delete_repo() -> impl Reply {
-    let location = "./restic";
+pub async fn delete_repo(server_config: ServerConfig) -> impl Reply {
+    let location = format!("{}", server_config.repo_location);
     match fs::remove_dir(location) {
         Ok(_) => Response::builder().status(200).body("").unwrap(),
         Err(_) => Response::builder().status(403).body("").unwrap(),
     }
 }
 
-pub fn create_config(config: Bytes) -> impl Reply {
+pub async fn create_config(config: Bytes, server_config: ServerConfig) -> impl Reply {
     info!("Received config creation request! Creating config...");
-    let file = fs::File::create("./restic/config").unwrap();
+    let file = fs::File::create(format!("{}/config", server_config.repo_location)).unwrap();
     let mut buf_writer = BufWriter::new(file);
     buf_writer.write(&config).unwrap();
     Response::builder().status(200).body("").unwrap()
 }
 
-pub fn check_config() -> impl Reply {
+pub async fn check_config(server_config: ServerConfig) -> impl Reply {
     info!("Received config check request! Checking config file if its there...");
-    match fs::metadata("./restic/config") {
+    match fs::metadata(format!("{}/config", server_config.repo_location)) {
         Ok(m) => Response::builder()
             .status(200)
             .header("Content-Length", m.len())
@@ -55,24 +57,29 @@ pub fn check_config() -> impl Reply {
     }
 }
 
-pub fn get_config() -> impl Reply {
-    match fs::read("./restic/config") {
+pub async fn get_config(server_config: ServerConfig) -> impl Reply {
+    match fs::read(format!("{}/config", server_config.repo_location)) {
         Ok(c) => Response::builder().status(200).body(c).unwrap(),
         Err(_) => Response::builder().status(404).body(vec![]).unwrap(),
     }
 }
 
-pub fn create_obj(obj_type: String, name: String, data: Bytes) -> impl Reply {
-    let location = format!("./restic/{}/{}", obj_type, name);
+pub async fn create_obj(
+    obj_type: String,
+    name: String,
+    data: Bytes,
+    server_config: ServerConfig,
+) -> impl Reply {
+    let location = format!("{}/{}/{}", server_config.repo_location, obj_type, name);
     let file = fs::File::create(location).unwrap();
     let mut buf_writer = BufWriter::new(file);
     buf_writer.write(&data).unwrap();
     warp::reply()
 }
 
-pub fn get_obj_list(obj_type: String) -> impl Reply {
+pub async fn get_obj_list(obj_type: String, server_config: ServerConfig) -> impl Reply {
     info!("Received object list request! Listing object...");
-    let location = format!("./restic/{}", obj_type);
+    let location = format!("{}/{}", server_config.repo_location, obj_type);
     match fs::read_dir(location) {
         Ok(f) => {
             let mut response = vec![];
@@ -97,9 +104,9 @@ pub fn get_obj_list(obj_type: String) -> impl Reply {
     }
 }
 
-pub fn check_obj(obj_type: String, name: String) -> impl Reply {
+pub async fn check_obj(obj_type: String, name: String, server_config: ServerConfig) -> impl Reply {
     info!("Received object check request! Checking object...");
-    let location = format!("./restic/{}/{}", obj_type, name);
+    let location = format!("{}/{}/{}", server_config.repo_location, obj_type, name);
     match fs::metadata(location) {
         Ok(m) => Response::builder()
             .status(200)
@@ -110,9 +117,9 @@ pub fn check_obj(obj_type: String, name: String) -> impl Reply {
     }
 }
 
-pub fn get_obj(obj_type: String, name: String) -> impl Reply {
+pub async fn get_obj(obj_type: String, name: String, server_config: ServerConfig) -> impl Reply {
     info!("Received object get request! Getting object...");
-    let location = format!("./restic/{}/{}", obj_type, name);
+    let location = format!("{}/{}/{}", server_config.repo_location, obj_type, name);
     match fs::File::open(location) {
         Ok(f) => {
             let mut buf_reader = BufReader::new(f);
@@ -124,9 +131,9 @@ pub fn get_obj(obj_type: String, name: String) -> impl Reply {
     }
 }
 
-pub fn delete_obj(obj_type: String, name: String) -> impl Reply {
+pub async fn delete_obj(obj_type: String, name: String, server_config: ServerConfig) -> impl Reply {
     info!("Received object deletion request! Deleting object...");
-    let location = format!("./restic/{}/{}", obj_type, name);
+    let location = format!("{}/{}/{}", server_config.repo_location, obj_type, name);
     match fs::File::open(location.clone()) {
         Ok(_) => {
             fs::remove_file(location).unwrap();
@@ -134,4 +141,11 @@ pub fn delete_obj(obj_type: String, name: String) -> impl Reply {
         }
         Err(_) => Response::builder().status(404).body("").unwrap(),
     }
+}
+
+// Share the config with all the handlers
+pub fn with_server_config(
+    server_config: ServerConfig,
+) -> impl Filter<Extract = (ServerConfig,), Error = Infallible> + Clone {
+    warp::any().map(move || server_config.clone())
 }

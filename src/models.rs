@@ -49,3 +49,8 @@ impl Object {
         Object { name, size }
     }
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ServerConfig {
+    pub repo_location: String,
+}
