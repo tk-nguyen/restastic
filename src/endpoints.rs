@@ -1,9 +1,7 @@
 use tracing::info;
 use warp::hyper::Response;
-use warp::Filter;
-use warp::{hyper::body::Bytes, Reply};
+use warp::{Buf, Reply};
 
-use std::convert::Infallible;
 use std::fs;
 use std::io::{BufReader, BufWriter, Read, Write};
 
@@ -37,11 +35,16 @@ pub async fn delete_repo(server_config: ServerConfig) -> impl Reply {
     }
 }
 
-pub async fn create_config(config: Bytes, server_config: ServerConfig) -> impl Reply {
+pub async fn create_config(mut config: impl Buf, server_config: ServerConfig) -> impl Reply {
     info!("Received config creation request! Creating config...");
     let file = fs::File::create(format!("{}/config", server_config.repo_location)).unwrap();
     let mut buf_writer = BufWriter::new(file);
-    buf_writer.write(&config).unwrap();
+    while config.has_remaining() {
+        let bytes = config.chunk();
+        let len = bytes.len();
+        buf_writer.write(bytes).unwrap();
+        config.advance(len);
+    }
     Response::builder().status(200).body("").unwrap()
 }
 
@@ -67,13 +70,18 @@ pub async fn get_config(server_config: ServerConfig) -> impl Reply {
 pub async fn create_obj(
     obj_type: String,
     name: String,
-    data: Bytes,
+    mut data: impl Buf,
     server_config: ServerConfig,
 ) -> impl Reply {
     let location = format!("{}/{}/{}", server_config.repo_location, obj_type, name);
     let file = fs::File::create(location).unwrap();
     let mut buf_writer = BufWriter::new(file);
-    buf_writer.write(&data).unwrap();
+    while data.has_remaining() {
+        let bytes = data.chunk();
+        let len = bytes.len();
+        buf_writer.write(bytes).unwrap();
+        data.advance(len);
+    }
     warp::reply()
 }
 
@@ -141,11 +149,4 @@ pub async fn delete_obj(obj_type: String, name: String, server_config: ServerCon
         }
         Err(_) => Response::builder().status(404).body("").unwrap(),
     }
-}
-
-// Share the config with all the handlers
-pub fn with_server_config(
-    server_config: ServerConfig,
-) -> impl Filter<Extract = (ServerConfig,), Error = Infallible> + Clone {
-    warp::any().map(move || server_config.clone())
 }
